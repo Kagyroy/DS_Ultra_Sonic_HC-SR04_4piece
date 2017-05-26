@@ -1,3 +1,6 @@
+#include <EEPROM.h>
+//#include <MCP23S17.h>
+
 //********************************************************************
 //*超音波センサを使って距離を表示するプログラム
 //********************************************************************
@@ -15,15 +18,20 @@ left_upper, right_upper デフォルトはキャリブレーションされた�
 ●mcp23s17を利用してIOを増やし、接続センサ数を増やす
  */
 
-#define echoPin_1 2 // Echo Pin@ sensor 1 //超音波出力開始（測定開始）
-#define trigPin_1 3 // Trigger Pin@ sensor 1
-#define echoPin_2 4 // Echo Pin@ sensor 2
-#define trigPin_2 5 // Trigger Pin@ sensor 2
-#define echoPin_3 6 // Echo Pin@ sensor 3
-#define trigPin_3 7 // Trigger Pin@ sensor 3
-#define echoPin_4 8 // Echo Pin@ sensor 4
-#define trigPin_4 9 // Trigger Pin@ sensor 4
-#define tonePin 13  //pin for speaker
+#define echoPin_1  2 // Echo Pin@ sensor 1 //超音波出力開始（測定開始）
+#define trigPin_1  3 // Trigger Pin@ sensor 1
+#define echoPin_2  4 // Echo Pin@ sensor 2
+#define trigPin_2  5 // Trigger Pin@ sensor 2
+#define echoPin_3  6 // Echo Pin@ sensor 3
+#define trigPin_3  7 // Trigger Pin@ sensor 3
+#define echoPin_4  8 // Echo Pin@ sensor 4
+#define trigPin_4  9 // Trigger Pin@ sensor 4
+#define tonePin  13  //output pin for speaker
+#define ledPin1  A1 //output pin for led  //ピン指定名称正しいか要注意
+#define ledPin2  A2 //output pin for led
+#define ledPin3  A3 //output pin for led
+#define ledPin4  A4 //output pin for led
+#define ledPin5  A5 //output pin for led
 
 #define sensor_1 1
 #define sensor_2 2
@@ -49,37 +57,73 @@ double Duration_3 = 0; //応答時間＠ sensor 3
 double Distance_3 = 0; //距離@ sensor 3
 double Duration_4 = 0; //応答時間＠ sensor 4
 double Distance_4 = 0; //距離@ sensor 4
+char incomingByte = 0;  //シリアル入力用変数
 
 void setup()
 {
   Serial.begin( 9600 );
-  pinMode( echoPin_1, INPUT );
-  pinMode( trigPin_1, OUTPUT );
-  pinMode( echoPin_2, INPUT );
-  pinMode( trigPin_2, OUTPUT );
-  pinMode( echoPin_3, INPUT );
-  pinMode( trigPin_3, OUTPUT );
-  pinMode( echoPin_4, INPUT );
-  pinMode( trigPin_4, OUTPUT );
+  pinMode(echoPin_1, INPUT);
+  pinMode(trigPin_1, OUTPUT);
+  pinMode(echoPin_2, INPUT);
+  pinMode(trigPin_2, OUTPUT);
+  pinMode(echoPin_3, INPUT);
+  pinMode(trigPin_3, OUTPUT);
+  pinMode(echoPin_4, INPUT);
+  pinMode(trigPin_4, OUTPUT);
+
+  pinMode(ledPin1, OUTPUT);
+  pinMode(ledPin2, OUTPUT);
+  pinMode(ledPin3, OUTPUT);
+  pinMode(ledPin4, OUTPUT);
+
+//  MCP mcp23s17(0,0);  //ioexpander 16bit(adress, ?)
 }
 void loop()
 {
-  Duration_1 = start_measure(sensor_1);
+//キャリブレーションモード 通常モード
+//起動時5秒間　ブザーなりっぱなし＆LED全灯になるのでその間にタクトSWを押すとキャリブレーションモードに入る
+  for(int i; i<1000; i++)
+  {
+    if(Serial.available())
+    {
+      incomingByte = Serial.read();
+      if(incomingByte == '1') sensor_calibration();  //
+    }
+    digitalWrite(ledPin1,HIGH);
+    digitalWrite(ledPin2,HIGH);
+    digitalWrite(ledPin3,HIGH);
+    digitalWrite(ledPin4,HIGH);
+    tone(tonePin, 100);
+    delay(5);
+  }
+  noTone(tonePin);
+  digitalWrite(ledPin1,LOW);
+  digitalWrite(ledPin2,LOW);
+  digitalWrite(ledPin3,LOW);
+  digitalWrite(ledPin4,LOW);
+  
+
+  
+//超音波出力＆反射時間取得 
+  Duration_1 = start_measure(sensor_1); 
   Duration_2 = start_measure(sensor_2);
   Duration_3 = start_measure(sensor_3);
   Duration_4 = start_measure(sensor_4);
 
-  Distance_1 = dir_to_dis(Duration_1);
+//時間を距離に変換(シリアル通信で出力しないなら不要→処理高速化）
+  Distance_1 = dir_to_dis(Duration_1);  
   Distance_2 = dir_to_dis(Duration_2);
   Distance_3 = dir_to_dis(Duration_3);
   Distance_4 = dir_to_dis(Duration_4);
 
-  print_Distance(sensor_1);
+//シリアル通信で距離を出力（シリアル通信で出力しないなら不要→処理高速化）
+  print_Distance(sensor_1); 
   print_Distance(sensor_2);
   print_Distance(sensor_3);
   print_Distance(sensor_4); 
   Serial.print("\n");
 
+//センサが何かを補足したらブザー
   if(Distance_1 < left_dst_thd) 
   {
     tone(tonePin, left_tone, wait_tone);
@@ -226,3 +270,25 @@ double dir_to_dis(double Duration)
   Distance = Duration*340*100/1000000; //経過時間(us)* 音速(340m/s)*(m→cm)/(sec→usec)
   return Distance;
 }
+
+void sensor_calibration()
+{
+  //100回値を入力して尤度の高い値を中央値に置く（あまりに中央値から外れた値は無視して平均を算出して校正値とし、EEPROMに書き込む）
+  
+  int Distance[100];
+  double Duration;
+  long DistanceSum = 0;
+  int DistanceAve;
+
+  for(int i=0; i<100; i++)
+  {
+    Duration = start_measure(sensor_1); 
+    Distance[i] = (int)dir_to_dis(Duration_1);  
+    DistanceSum = Distance[i];
+  }
+  //ここで余りに外れた値をはじく
+  //平均値を算出してEEPROMに書き込む
+  DistanceAve = DistanceSum/100;
+  
+}
+

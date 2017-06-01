@@ -1,5 +1,6 @@
 #include <EEPROM.h>
 //#include <MCP23S17.h>
+#define leonardo  //mega32u4は直接USB接続するためserial.read時にwhile(!serial)を挟んで待つ必要があるため
 
 //********************************************************************
 //*超音波センサを使って距離を表示するプログラム
@@ -18,6 +19,7 @@ left_upper, right_upper デフォルトはキャリブレーションされた�
 ●mcp23s17を利用してIOを増やし、接続センサ数を増やす
  */
 
+
 #define echoPin_1  2 // Echo Pin@ sensor 1 //超音波出力開始（測定開始）
 #define trigPin_1  3 // Trigger Pin@ sensor 1
 #define echoPin_2  4 // Echo Pin@ sensor 2
@@ -33,21 +35,24 @@ left_upper, right_upper デフォルトはキャリブレーションされた�
 #define ledPin4  A4 //output pin for led
 #define ledPin5  A5 //output pin for led
 
-#define sensor_1 1
-#define sensor_2 2
-#define sensor_3 3
-#define sensor_4 4  
+#define sensor_1 0  //変数として、配列で定義しておけば4センサ処理が必要場面で短くコーディングできる（
+#define sensor_2 1
+#define sensor_3 2
+#define sensor_4 3  
+#define SENSOR_NUM  4 //センサー数
 
+//TBE(To Be Edited)
 #define left_dst_thd  100  //左境界センサのブザー出力閾値（この値以下で警告
 #define right_dst_thd  100  //右境界センサのブザー出力閾値（この値以下で警告
 #define upper_left_dst_thd  130  //左上境界センサのブザー出力閾値（この値以下で警告
 #define upper_right_dst_thd  130  //右上境界センサのブザー出力閾値（この値以下で警告
 
-#define left_tone 262 //左境界センサ反応時ブザー音
-#define right_tone 362 //右境界センサ反応時ブザー音
-#define upper_left_tone 2620 //左上境界センサ反応時ブザー音
-#define upper_right_tone 3620 //右上境界センサ反応時ブザー音
+#define left_tone 1000 //左境界センサ反応時ブザー音
+#define right_tone 2000 //右境界センサ反応時ブザー音
+#define upper_left_tone 3000 //左上境界センサ反応時ブザー音
+#define upper_right_tone 4000 //右上境界センサ反応時ブザー音
 #define wait_tone 100 //
+#define TRYNUM 20  //超音波センサキャリブレーション時の距離取得回数
 
 double Duration_1 = 0; //応答時間＠ sensor 1
 double Distance_1 = 0; //距離@ sensor 1
@@ -58,10 +63,21 @@ double Distance_3 = 0; //距離@ sensor 3
 double Duration_4 = 0; //応答時間＠ sensor 4
 double Distance_4 = 0; //距離@ sensor 4
 char incomingByte = 0;  //シリアル入力用変数
+int intsize = sizeof(int);
+
+struct CaliData //センサーキャリブレーションデータ一式
+{
+  int UltraSonic[SENSOR_NUM];
+};
+struct CaliData _liquid_office;
 
 void setup()
 {
   Serial.begin( 9600 );
+  #ifdef leonardo
+  while(!Serial);
+  #endif
+  
   pinMode(echoPin_1, INPUT);
   pinMode(trigPin_1, OUTPUT);
   pinMode(echoPin_2, INPUT);
@@ -76,33 +92,63 @@ void setup()
   pinMode(ledPin3, OUTPUT);
   pinMode(ledPin4, OUTPUT);
 
+   //センサキャリブレーション値をロード
+  for(int i=0; i<SENSOR_NUM; i++)
+  {
+    _liquid_office.UltraSonic[i] = EEPROM.read(i * intsize);
+  }
+
 //  MCP mcp23s17(0,0);  //ioexpander 16bit(adress, ?)
 }
 void loop()
 {
-//キャリブレーションモード 通常モード
-//起動時5秒間　ブザーなりっぱなし＆LED全灯になるのでその間にタクトSWを押すとキャリブレーションモードに入る
-  for(int i; i<1000; i++)
+//キャリブレーションモード分岐
+//起動時10秒間　ブザーなりっぱなし＆LED全灯になるのでその間にシリアル経由で'1'を受け取るとキャリブレーションモードに入る
+  digitalWrite(ledPin1,HIGH);
+  digitalWrite(ledPin2,HIGH);
+  digitalWrite(ledPin3,HIGH);
+  digitalWrite(ledPin4,HIGH);
+  tone(tonePin, 100);
+  
+  for(int i=0; i<200; i++)
   {
-    if(Serial.available())
+    Serial.println("Press '1' to branch to calibration mode");
+    if(Serial.available() > 0)
     {
       incomingByte = Serial.read();
-      if(incomingByte == '1') sensor_calibration();  //
+      Serial.print("Serial.read = ");
+      Serial.println(incomingByte);
+      if(incomingByte == '1')
+      {
+        sensor_calibration();  //シリアル経由で'1'が読み込まれたらキャリブレーションモード
+        goto cali_end;  //キャリブレーションが終了したら即時ループ脱出
+      }
     }
-    digitalWrite(ledPin1,HIGH);
-    digitalWrite(ledPin2,HIGH);
-    digitalWrite(ledPin3,HIGH);
-    digitalWrite(ledPin4,HIGH);
-    tone(tonePin, 100);
-    delay(5);
+    delay(50); //50ms×200回で約10秒
   }
+cali_end: //キャリブレーション脱出ラベル  
+  
+  //ブザーとLEDを消す
   noTone(tonePin);
   digitalWrite(ledPin1,LOW);
   digitalWrite(ledPin2,LOW);
   digitalWrite(ledPin3,LOW);
   digitalWrite(ledPin4,LOW);
-  
 
+/*
+//To Be Delete eeprom書き込み確認用
+ int  eeprom_read;
+  for(int i=0; i<SENSOR_NUM; i++)
+  {
+    eeprom_read = EEPROM.read(i * intsize);
+    Serial.print("EEPROM");
+    Serial.print(i,DEC);
+    Serial.print("=");
+    Serial.print(eeprom_read, DEC);
+    Serial.print("\n");  
+  }
+  while(1);
+  */
   
 //超音波出力＆反射時間取得 
   Duration_1 = start_measure(sensor_1); 
@@ -124,7 +170,7 @@ void loop()
   Serial.print("\n");
 
 //センサが何かを補足したらブザー
-  if(Distance_1 < left_dst_thd) 
+  if(Distance_1 < left_dst_thd)
   {
     tone(tonePin, left_tone, wait_tone);
     delay(wait_tone);
@@ -146,7 +192,7 @@ void loop()
   }
 }
 
-//*****関数群*****//
+//***************関数群***************//
 
 //センサごとの測定距離をPCにシリアル出力
 void print_Distance(int sensor_number)
@@ -221,7 +267,7 @@ void print_Distance(int sensor_number)
 }
 
 //指定したセンサの計測を開始＆測定値（時間）を返す
-double start_measure(int sensor_number)
+double start_measure(int sensor_number) //※trigPin_xとechoPin_xを引数にする方がプログラムメモリ節約できる
 {
   double Duration = 0;
   
@@ -273,22 +319,34 @@ double dir_to_dis(double Duration)
 
 void sensor_calibration()
 {
-  //100回値を入力して尤度の高い値を中央値に置く（あまりに中央値から外れた値は無視して平均を算出して校正値とし、EEPROMに書き込む）
-  
-  int Distance[100];
+  Serial.println("Start calibration mode");
+  //20(TRYNUM)回測距して平均値をEEPROMに書き込む
+  int Distance[TRYNUM];
   double Duration;
-  long DistanceSum = 0;
+  long DistanceSum;
   int DistanceAve;
 
-  for(int i=0; i<100; i++)
-  {
-    Duration = start_measure(sensor_1); 
-    Distance[i] = (int)dir_to_dis(Duration_1);  
-    DistanceSum = Distance[i];
-  }
-  //ここで余りに外れた値をはじく
-  //平均値を算出してEEPROMに書き込む
-  DistanceAve = DistanceSum/100;
-  
+  for(int sensor_x=0; sensor_x<SENSOR_NUM; sensor_x++) //センサ数繰り返し
+  { 
+    DistanceSum = 0;  
+    for(int i=0; i<TRYNUM; i++) //平均値算出用サンプルデータ取得回数
+    {
+      Duration = start_measure(sensor_x); 
+      Distance[i] = (int)dir_to_dis(Duration);  
+      DistanceSum += Distance[i];
+    }   
+    DistanceAve = DistanceSum/TRYNUM; //平均値算出
+    _liquid_office.UltraSonic[sensor_x] = DistanceAve; //キャリブレーション値の更新
+    EEPROM.write(sensor_x * intsize, DistanceAve); //EEPROMにアドレス0から順に平均値書き込み
+  }  
+  Serial.println("Calibration finished! Result is below");
+  Serial.print("sensor_1 = ");
+  Serial.println(_liquid_office.UltraSonic[sensor_1]);
+  Serial.print("sensor_2 = ");
+  Serial.println(_liquid_office.UltraSonic[sensor_2]);
+  Serial.print("sensor_3 = ");
+  Serial.println(_liquid_office.UltraSonic[sensor_3]);
+  Serial.print("sensor_4 = ");
+  Serial.println(_liquid_office.UltraSonic[sensor_4]);
 }
 
